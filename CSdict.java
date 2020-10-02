@@ -38,11 +38,8 @@ public class CSdict {
             return;
         }
         //Setting up user-interaction session.
-        Session session = Session.getInstance();
-        Session.debugOn = debugOn;
-        Session.MAX_LEN = 255;
-        Session.listen();
-        System.out.println("Program will now exit.");
+        Session session = new Session(debugOn, MAX_LEN);
+        session.listen();
     }
 }
     
