@@ -1,26 +1,37 @@
+import Exceptions.RequestTimeoutException;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.util.Arrays;
 
 /* TODO
-* (optional) add help status messages
-* handle timeouts while trying to connect to server (should be in the api)
-* deal with request timeouts (i.e. if user idles for a while the server will close, we need to re-open or prompt them to do so)
-* add in ALL remaining assignment-specific error codes to raise (might do it as an exception library)
-* (optional) error handling/test suite
-* deal with debug on/off
+* debug
+* final cleanup
+* format for remote server functionality
+* DONE
 * */
-//And uhm this new reader on each command call should also give us a means to handle timeouts!
-//deal with setting up 150 to be ignored
+
+/*
+For doing timeout stuff!
+Socket socket = new Socket();
+// This limits the time allowed to establish a connection in the case
+// that the connection is refused or server doesn't exist.
+socket.connect(new InetSocketAddress(host, port), timeout);
+// This stops the request from dragging on after connection succeeds.
+socket.setSoTimeout(timeout);
+
+* */
 public class Session {
 
 
     private Boolean programLive;
     private Boolean connectionOpen;
-    private Boolean debugOn;
+    private final Boolean debugOn;
     private final int MAX_LEN;
     private String currDict;
 
@@ -39,25 +50,19 @@ public class Session {
     private boolean generalResponseError(String replyMessage) throws IOException {
         boolean res = true;
         String[] reply = replyMessage.split(" ");
+
+        String debugMssg = "<-- " + replyMessage;
+        if (debugOn)
+            System.out.println(debugMssg);
+
         switch (reply[0]) {
             case "500":
-                System.out.println("Syntax error, command not recognized");
-                break;
             case "501":
-                System.out.println("Syntax error, illegal parameters");
-                break;
             case "502":
-                System.out.println("Command not implemented");
-                break;
             case "503":
-                System.out.println("Command parameter not implemented");
                 break;
             case "420":
-                System.out.println("Server temporarily unavailable");
-                close();
-                break;
             case "421":
-                System.out.println("Server shutting down at operator request");
                 close();
                 break;
             default:
@@ -67,19 +72,29 @@ public class Session {
         return res;
     }
 
-    private void open(String server, String port) throws IOException {
-        //TODO connection timeout handling, i.e. cannot establish connection within 30s - piazza this one
-
+    private void open(String server, String port) {
         try {
             Integer portNumber = Integer.decode(port);
             System.out.printf("Establishing connection to: %s on port %d\n", server, portNumber);
 
-            dictSocket = new Socket(server, portNumber);
+            dictSocket = new Socket();
+            int timeout = 30 * 1000;
+            dictSocket.connect(new InetSocketAddress(server, portNumber), timeout);
+
             message = new PrintWriter(dictSocket.getOutputStream(), true);
             response = new BufferedReader(new InputStreamReader(dictSocket.getInputStream()));
             if (generalResponseError(response.readLine()))
                 return;
+
+            String debugMssg = "<-- " + response.readLine();
+            if (debugOn)
+                System.out.println(debugMssg);
+
             connectionOpen = true;
+        } catch (SocketTimeoutException ste) {
+            String errorMessage = "999 Processing error.";
+            System.out.format("\u001B[1m%s\u001B[0m Timed out while waiting for response.\n", errorMessage);
+            return;
         } catch (IOException exception) {
             String errorMessage = "920 Control connection to " + server +  " on port " + port +" failed to open.";
             System.out.format("\u001B[1m%s\u001B[0m Invalid host or socket input.\n", errorMessage);
@@ -109,10 +124,11 @@ public class Session {
         programLive = false;
     }
 
-    private void dict() throws IOException {
+    private void dict() throws IOException, RequestTimeoutException {
         try {
             response = new BufferedReader(new InputStreamReader(dictSocket.getInputStream()));
         } catch (IOException exception) {
+            close();
             throw new RequestTimeoutException();
         }
         System.out.println("ENTERING loop");
@@ -122,14 +138,24 @@ public class Session {
             if (generalResponseError(reply)) {
                 break;
             } else if (reply.matches("(250).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 break;
             } else if (reply.matches("(554).*")) {
-                System.out.println("No dictionaries present on this server.");
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 break;
-            } else if (reply.matches("(110).*") || reply.matches("(\\.)")) {
-                continue;
+            } else if (reply.matches("(110).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
             } else {
-                System.out.println(reply);
+                String out = "@ " + reply;
+                System.out.println(out);
             }
         }
     }
@@ -138,10 +164,11 @@ public class Session {
         currDict = dictionary;
     }
 
-    private void define(String word) throws IOException {
+    private void define(String word) throws IOException, RequestTimeoutException {
         try {
             response = new BufferedReader(new InputStreamReader(dictSocket.getInputStream()));
         } catch (IOException exception) {
+            close();
             throw new RequestTimeoutException();
         }
         String mssg = "DEFINE " + currDict + " " + word;
@@ -151,61 +178,116 @@ public class Session {
             if (generalResponseError(reply)) {
                 break;
             } else if (reply.matches("(250).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 break;
             } else if (reply.matches("(550).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 System.out.println("Invalid database. change set dict");
                 break;
             } else if (reply.matches("(552).*")) {
                 //MATCH * word . == all matches using server default strat.
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 String temp = currDict;
                 set("*");
                 match(word, ".");
                 set(temp);
                 break;
             } else if (reply.matches("(151).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 String line[] = reply.split(" ");
                 System.out.println(line[2]);
-            } else if (reply.matches("(\\.)")) {
-                System.out.println("");
             } else {
-                System.out.println(reply);
+                String out = "@ " + reply;
+                System.out.println(out);
             }
 
         }
     }
 
-    private void match(String word, String strat) throws IOException {
+    private void match(String word, String strat) throws IOException, RequestTimeoutException {
         try {
             response = new BufferedReader(new InputStreamReader(dictSocket.getInputStream()));
         } catch (IOException exception) {
+            close();
             throw new RequestTimeoutException();
         }
         String mssg = "MATCH " + currDict + " " + strat + " " + word;
-        //message.println(""); //Hopefully detect via exception a close connection
         message.println(mssg);
         String reply;
         while ((reply = response.readLine()) != null) {
             if (generalResponseError(reply)) {
                 break;
             } else if (reply.matches("(250).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 break;
             } else if (reply.matches("(550).*")) {
-                System.out.println("Invalid database. change set dict");
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 break;
             } else if (reply.matches("(552).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
                 String out = (strat.equals(".")) ? "****No matches found****" : "*****No matching word(s) found*****";
                 System.out.println(out);
                 break;
-            } else if (reply.matches("(152).*") || reply.matches("(150).*") || reply.matches("(\\.)")) {
-                continue;
+            } else if (reply.matches("(152).*") || reply.matches("(150).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
+
             } else {
-                System.out.println(reply);
+                String out = "@ " + reply;
+                System.out.println(out);
             }
         }
     }
 
+    private void help(String flag) {
+        if (!flag.equals("command"))
+            return;
+        String open = "open SERVER PORT\n- where PORT must be a numeric value and both parameters must be supplied." +
+                "\n- unexpected if connection is already open.";
+        String close = "close\n- closes established connection.\n- unexpected if there are no open connections.";
+        String quit = "quit\n- closes any established connection and exits the program.";
+        String dict = "dict\n- retrieve and prints list of dictionaries.\n- unexpected if no open connection.";
+        String set = "set DICTIONARY\n- where dictionary must be one returned by dict or one of the required virtual " +
+                "databases (*, !).\n- Set the dictionary to retrieve subsequent definitions and/or matches from." +
+                "\n- unexpected if no open connection.";
+        String define = "define WORD\n- where WORD is any character string.\n- Retrieve and print all the definitions " +
+                "for WORD from dictionary last set using the set command.\n- unexpected if no open connection.";
+        String match = "match WORD\n- where WORD is any character string.\n- Retrieve and print all the exact matches found" +
+                "for WORD from dictionary last set using the set command.\n- unexpected if no open connection.";
+        String prefixmatch = "prefixmatch WORD\n- where WORD is any character string.\n- Retrieve and print all the " +
+                "matches found using the prefix specified by WORD." +
+                "for WORD from dictionary last set using the set command.\n- unexpected if no open connection.";
+        System.out.format("%s\n, %s\n, %s\n, %s\n, %s\n, %s\n, %s\n, %s\n", open, close, quit, dict, set, define, match, prefixmatch);
+    }
 
-    private void runCommand(String cmd, String[] args) throws IOException {
+
+    private void runCommand(String cmd, String[] args) throws IOException, RequestTimeoutException {
+        String debugMssg = "> " + cmd;
+        if (debugOn)
+            System.out.println(debugMssg);
+
         switch (cmd) {
             case "open":
                 open(args[0], args[1]);
@@ -231,6 +313,8 @@ public class Session {
             case "quit":
                 quit();
                 break;
+            case "help":
+                help("cf");
             default:
                 //invalid command
                 System.out.println("error");
@@ -294,6 +378,11 @@ public class Session {
                     res = false;
                 }
                 break;
+            case "help":
+                if (!args[1].equals("-commands"))
+                    res = false;
+                break;
+
             default:
                 //unknown command
                 System.out.println("\u001B[1m 900 Invalid command.\u001B[0m For description of valid commands see help -commands");
@@ -344,8 +433,10 @@ public class Session {
                     //Run the cmd
                     runCommand(command, arguments);
                 }
+            } catch(RequestTimeoutException rte) {
+                String errorMessage = "925 Control connection I/O error, closing control connection";
+                System.out.format("\u001B[1m%s\u001B[0m \n", errorMessage);
             } catch (IOException exception) {
-                //TODO the rest of the exception handling
                 System.err.println("999 Processing error. Unknown error, terminating.");
                 System.exit(-1);
             }
