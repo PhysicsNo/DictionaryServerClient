@@ -50,19 +50,22 @@ public class Session {
     private boolean generalResponseError(String replyMessage) throws IOException {
         boolean res = true;
         String[] reply = replyMessage.split(" ");
-
-        String debugMssg = "<-- " + replyMessage;
-        if (debugOn)
-            System.out.println(debugMssg);
+        String debugMssg;
 
         switch (reply[0]) {
             case "500":
             case "501":
             case "502":
             case "503":
+                debugMssg = "<-- " + replyMessage;
+                if (debugOn)
+                    System.out.println(debugMssg);
                 break;
             case "420":
             case "421":
+                debugMssg = "<-- " + replyMessage;
+                if (debugOn)
+                    System.out.println(debugMssg);
                 close();
                 break;
             default:
@@ -78,16 +81,17 @@ public class Session {
             System.out.printf("Establishing connection to: %s on port %d\n", server, portNumber);
 
             dictSocket = new Socket();
-            int timeout = 30 * 1000;
+            int timeout = 5 * 1000;
             dictSocket.connect(new InetSocketAddress(server, portNumber), timeout);
-
+            dictSocket.setSoTimeout(timeout);
             message = new PrintWriter(dictSocket.getOutputStream(), true);
             response = new BufferedReader(new InputStreamReader(dictSocket.getInputStream()));
-            if (generalResponseError(response.readLine()))
-                return;
 
-            String debugMssg = "<-- " + response.readLine();
-            if (debugOn)
+
+            String initialReply = response.readLine();
+
+            String debugMssg = "<-- " + initialReply;
+            if (debugOn && !generalResponseError(initialReply))
                 System.out.println(debugMssg);
 
             connectionOpen = true;
@@ -131,8 +135,11 @@ public class Session {
             close();
             throw new RequestTimeoutException();
         }
-        System.out.println("ENTERING loop");
         message.println("SHOW DB");
+        String debugMsg = "> " + "SHOW DB";
+        if (debugOn)
+            System.out.println(debugMsg);
+
         String reply;
         while ((reply = response.readLine()) != null) {
             if (generalResponseError(reply)) {
@@ -154,8 +161,8 @@ public class Session {
                 if (debugOn)
                     System.out.println(debugMssg);
             } else {
-                String out = "@ " + reply;
-                System.out.println(out);
+                //String out = "@ " + reply;
+                System.out.println(reply);
             }
         }
     }
@@ -195,7 +202,7 @@ public class Session {
                 String debugMssg = "<-- " + reply;
                 if (debugOn)
                     System.out.println(debugMssg);
-
+                System.out.println("***No definition found***");
                 String temp = currDict;
                 set("*");
                 match(word, ".");
@@ -208,6 +215,10 @@ public class Session {
 
                 String line[] = reply.split(" ");
                 System.out.println(line[2]);
+            } else if (reply.matches("(150).*")) {
+                String debugMssg = "<-- " + reply;
+                if (debugOn)
+                    System.out.println(debugMssg);
             } else {
                 String out = "@ " + reply;
                 System.out.println(out);
@@ -225,6 +236,11 @@ public class Session {
         }
         String mssg = "MATCH " + currDict + " " + strat + " " + word;
         message.println(mssg);
+
+        String debugMsg = "> " + mssg;
+        if (debugOn)
+            System.out.println(debugMsg);
+
         String reply;
         while ((reply = response.readLine()) != null) {
             if (generalResponseError(reply)) {
@@ -255,8 +271,7 @@ public class Session {
                     System.out.println(debugMssg);
 
             } else {
-                String out = "@ " + reply;
-                System.out.println(out);
+                System.out.println(reply);
             }
         }
     }
@@ -284,9 +299,6 @@ public class Session {
 
 
     private void runCommand(String cmd, String[] args) throws IOException, RequestTimeoutException {
-        String debugMssg = "> " + cmd;
-        if (debugOn)
-            System.out.println(debugMssg);
 
         switch (cmd) {
             case "open":
